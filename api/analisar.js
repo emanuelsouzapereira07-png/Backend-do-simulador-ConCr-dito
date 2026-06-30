@@ -1,7 +1,4 @@
-import OpenAI from 'openai';
 import { buildSupervisorPrompt } from '../prompts/supervisor.js';
-
-const client = new OpenAI({ apiKey: process.env.OPENAI_API_KEY });
 
 function fallbackJson(message){
   return {
@@ -10,9 +7,17 @@ function fallbackJson(message){
     feedback: 'Erro na análise',
     comment: message,
     strengths: [],
-    improvements: ['Verifique a configuração do backend e da OPENAI_API_KEY.'],
+    improvements: ['Verifique a configuração do backend e da GEMINI_API_KEY na Vercel.'],
     suggested: ''
   };
+}
+
+function extractJson(text){
+  if(!text) return '{}';
+  const clean = text.replace(/```json|```/g,'').trim();
+  const start = clean.indexOf('{');
+  const end = clean.lastIndexOf('}');
+  return start >= 0 && end >= start ? clean.slice(start, end + 1) : clean;
 }
 
 export default async function handler(req, res){
@@ -22,24 +27,29 @@ export default async function handler(req, res){
 
   if(req.method === 'OPTIONS') return res.status(200).end();
   if(req.method !== 'POST') return res.status(405).json(fallbackJson('Método não permitido. Use POST.'));
-  if(!process.env.OPENAI_API_KEY) return res.status(500).json(fallbackJson('OPENAI_API_KEY não configurada na Vercel.'));
+  if(!process.env.GEMINI_API_KEY) return res.status(500).json(fallbackJson('GEMINI_API_KEY não configurada na Vercel.'));
 
   try{
-    const payload = req.body || {};
-    const prompt = buildSupervisorPrompt(payload);
+    const prompt = buildSupervisorPrompt(req.body || {});
+    const model = process.env.GEMINI_MODEL || 'gemini-1.5-flash';
+    const url = `https://generativelanguage.googleapis.com/v1beta/models/${model}:generateContent?key=${process.env.GEMINI_API_KEY}`;
 
-    const completion = await client.chat.completions.create({
-      model: process.env.OPENAI_MODEL || 'gpt-4.1-mini',
-      temperature: 0.25,
-      response_format: { type: 'json_object' },
-      messages: [
-        { role: 'system', content: 'Você avalia atendimentos de suporte da ConCrédito com rigor, clareza e retorno apenas em JSON válido.' },
-        { role: 'user', content: prompt }
-      ]
+    const geminiRes = await fetch(url, {
+      method: 'POST',
+      headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify({
+        contents: [{ role: 'user', parts: [{ text: prompt }] }],
+        generationConfig: { temperature: 0.35, responseMimeType: 'application/json' }
+      })
     });
 
-    const content = completion.choices?.[0]?.message?.content || '{}';
-    const parsed = JSON.parse(content);
+    const geminiData = await geminiRes.json();
+    if(!geminiRes.ok){
+      return res.status(500).json(fallbackJson(geminiData?.error?.message || 'Erro ao chamar Gemini.'));
+    }
+
+    const text = geminiData?.candidates?.[0]?.content?.parts?.[0]?.text || '{}';
+    const parsed = JSON.parse(extractJson(text));
     return res.status(200).json(parsed);
   }catch(error){
     return res.status(500).json(fallbackJson(error.message || 'Erro desconhecido no backend.'));

@@ -1,16 +1,13 @@
 {
-  "name": "central-concredito-v14-enterprise",
-  "version": "14.0.0",
+  "name": "central-concredito-vendas-v15",
+  "version": "15.0.0",
   "type": "module",
   "private": true,
   "scripts": {
     "dev": "vercel dev",
     "check": "node --check script.js"
   },
-  "dependencies": {
-    "@vercel/node": "latest",
-    "openai": "latest"
-  },
+  "dependencies": {},
   "devDependencies": {
     "vercel": "latest"
   }
