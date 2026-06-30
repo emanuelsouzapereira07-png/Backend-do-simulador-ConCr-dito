@@ -11,9 +11,9 @@ export default async function handler(req, res){
   try{
     const payload=req.body || {};
     const row={
-      id: payload.id,
-      seller_name: payload.seller_name,
-      seller_team: payload.seller_team,
+      id: payload.id || `treino_${Date.now()}_${Math.random().toString(16).slice(2)}`,
+      seller_name: payload.seller_name || payload.nome || 'Sem nome',
+      seller_team: payload.seller_team || payload.equipe || 'Sem time',
       created_at: payload.created_at || new Date().toISOString(),
       started_at: payload.started_at,
       ended_at: payload.ended_at,
