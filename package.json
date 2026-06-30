@@ -1,0 +1,17 @@
+{
+  "name": "central-concredito-v14-enterprise",
+  "version": "14.0.0",
+  "type": "module",
+  "private": true,
+  "scripts": {
+    "dev": "vercel dev",
+    "check": "node --check script.js"
+  },
+  "dependencies": {
+    "@vercel/node": "latest",
+    "openai": "latest"
+  },
+  "devDependencies": {
+    "vercel": "latest"
+  }
+}
