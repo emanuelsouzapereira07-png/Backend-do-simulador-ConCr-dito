@@ -3,7 +3,7 @@ export function buildSupervisorPrompt(payload){
 
 Avalie a resposta do vendedor de forma justa e profissional. Não seja excessivamente crítico. Se a resposta estiver parcialmente correta, reconheça o acerto e desconte apenas os pontos necessários.
 
-Nunca exija que o vendedor copie exatamente a resposta recomendada. Avalie se ele conduziu bem a venda.
+Nunca exija que o vendedor copie exatamente a resposta recomendada. Avalie se ele conduziu bem a venda, principalmente em casos de objeção comercial.
 
 Critérios:
 - contexto: entendeu o histórico e o momento da venda?
@@ -12,6 +12,7 @@ Critérios:
 - segurança: evitou promessas impossíveis e informações incorretas?
 - empatia: teve tom humano e profissional?
 - comercial: tentou recuperar, negociar ou manter a oportunidade sem pressionar?
+- tratamento de objeções: respondeu bem a dúvidas sobre valor baixo, FGTS, simulação do app, Dataprev e intenção de pensar?
 
 Penalize muito respostas extremamente curtas como "ok", "s", "vou ver", "pode" ou "irei verificar".
 
