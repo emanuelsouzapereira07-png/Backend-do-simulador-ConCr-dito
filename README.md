@@ -1,49 +1,46 @@
-# Central ConCrédito — Simulador de Vendas V15
+# Backend — Central ConCrédito v14
 
-Esta versão mantém o visual original da V14 e altera apenas o fluxo solicitado para o setor de vendas.
+Backend preparado para Vercel, Gemini e Supabase.
 
-## Alterações implementadas
+## Rotas principais
 
-- Foco alterado de Suporte para Vendas.
-- Removido o botão **Resposta oficial** antes da avaliação.
-- A resposta recomendada aparece somente após o vendedor responder e receber avaliação.
-- Removidos os casos de pagamento devolvido e demais casos exclusivos do suporte.
-- Adicionados casos comerciais:
-  - cliente quer parcelas menores;
-  - cliente quer valor maior;
-  - cliente vai pensar;
-  - interesse inicial;
-  - medo de golpe;
-  - juros altos;
-  - concorrente;
-  - cliente sumiu;
-  - cliente sem tempo.
-- Quitação adaptada como encaminhamento ao suporte.
-- Supervisor Local ajustado para avaliar negociação, condução, empatia, segurança e recuperação comercial.
-- Backend preparado para Gemini via Vercel usando `GEMINI_API_KEY`.
+- `GET /api/health` — verifica se backend está online.
+- `POST /api/analisar` — avaliação com Gemini.
+- `GET/POST/PUT/DELETE /api/cases` — gerenciar casos.
+- `GET/POST /api/results` — salvar e listar resultados.
+- `GET/POST /api/audit` — histórico de alterações.
+- `GET/POST /api/notifications` — notificações.
+- `GET /api/stats` — estatísticas dos casos.
 
-## Publicação
+## Senhas padrão
 
-### Frontend GitHub Pages
-Envie para o repositório do site:
+- Painel de Casos: `casos2026`
+- Painel Gestor: `gestor2026`
 
-- `index.html`
-- `style.css`
-- `script.js`
-- `casos.js`
-- `README.md`
+Podem ser configuradas na Vercel com:
 
-### Backend Vercel
-Envie para o repositório da API:
+- `CASE_PANEL_PASSWORD`
+- `MANAGER_PANEL_PASSWORD`
 
-- `api/`
-- `prompts/`
-- `package.json`
-- `vercel.json`
-- `.env.example`
+## Variáveis de ambiente
 
-Na Vercel, adicione a variável:
+Copie `.env.example` e configure na Vercel:
 
-`GEMINI_API_KEY`
+- `GEMINI_API_KEY`
+- `GEMINI_MODEL`
+- `SUPABASE_URL`
+- `SUPABASE_SERVICE_ROLE_KEY`
+- `CASE_PANEL_PASSWORD`
+- `MANAGER_PANEL_PASSWORD`
 
-com a chave do Gemini.
+## Banco de dados
+
+Execute o arquivo `supabase_schema.sql` no SQL Editor do Supabase.
+
+## Como publicar
+
+1. Suba esta pasta como repositório do backend.
+2. Importe o repositório na Vercel.
+3. Configure as variáveis de ambiente.
+4. Execute o SQL no Supabase.
+5. Use a URL da Vercel no frontend quando quiser integrar online.

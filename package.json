@@ -1,14 +1,1 @@
-{
-  "name": "central-concredito-vendas-v15",
-  "version": "15.0.0",
-  "type": "module",
-  "private": true,
-  "scripts": {
-    "dev": "vercel dev",
-    "check": "node --check script.js"
-  },
-  "dependencies": {},
-  "devDependencies": {
-    "vercel": "latest"
-  }
-}
+{"name":"backend-simulador-concredito-v14","version":"14.0.0","type":"module","private":true,"scripts":{"dev":"vercel dev","start":"vercel dev"},"dependencies":{}}
