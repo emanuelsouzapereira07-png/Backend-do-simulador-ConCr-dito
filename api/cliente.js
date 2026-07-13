@@ -3,21 +3,115 @@ import { cors, json } from './_utils.js';
 const clamp=(n,min=0,max=100)=>Math.max(min,Math.min(max,Number.isFinite(Number(n))?Number(n):min));
 const text=(v,max=1200)=>String(v??'').trim().slice(0,max);
 
-function fallback(){
+function fallback(payload=null){
   const safeReason='IA principal temporariamente indisponível. O atendimento continuou pelo modo de contingência.';
+  const last=text(payload?.lastAgentMessage,1800).toLowerCase();
+  const product=text(payload?.caseData?.product,120).toLowerCase();
+  const title=text(payload?.caseData?.title,200).toLowerCase();
+  const recent=(payload?.history||[]).filter(m=>m.author==='cliente').slice(-8).map(m=>String(m.text||'').toLowerCase());
+
+  const pick=(options)=>{
+    const found=options.find(x=>!recent.includes(x.toLowerCase()));
+    return found||options[options.length-1];
+  };
+
+  let message='Você pode me explicar melhor como vamos seguir com o meu caso?';
+  let stage='entendimento';
+  let resolution='parcial';
+  let missing=['próximo passo claro'];
+  let decision='pedir_esclarecimento';
+  let quality=45;
+
+  const isVehicle=/ve[ií]culo|carro|refinanciamento/.test(`${product} ${title}`);
+  const asksDocs=/document|crlv|renavam/.test(last);
+  const asksCpf=/cpf|dados pessoais|nome completo/.test(last);
+  const saysPossible=/\b(sim|consegue|é possível|podemos|dá para)\b/.test(last);
+  const mentionsAnalysis=/an[aá]lis|simula|consulta/.test(last);
+  const mentionsValue=/valor|parcela|taxa|libera/.test(last);
+  const tooShort=last.length<18;
+
+  if(isVehicle){
+    if(asksDocs){
+      message=pick([
+        'Certo. Quais documentos do veículo e pessoais eu preciso enviar?',
+        'Tudo bem. Você pode listar a documentação necessária e dizer por onde devo enviar?',
+        'Quais documentos exatamente você precisa para fazer a análise?'
+      ]);
+      stage='verificacao'; quality=62; missing=['lista de documentos','canal de envio']; decision='fazer_pergunta_coerente';
+    }else if(asksCpf){
+      message=pick([
+        'Certo, posso informar o CPF. Você precisa de mais algum dado para consultar?',
+        'Tudo bem. Além do CPF, qual outra informação você precisa para verificar?'
+      ]);
+      stage='verificacao'; quality=66; missing=['demais dados necessários']; decision='aceitar_proximo_passo';
+    }else if(saysPossible){
+      message=pick([
+        'Certo. Como funciona o refinanciamento e quais documentos preciso enviar?',
+        'Entendi. Qual é o próximo passo para fazer uma simulação com o veículo quitado?'
+      ]);
+      stage='duvida'; quality=58; missing=['explicação do processo','documentos']; decision='fazer_pergunta_coerente';
+    }else if(mentionsAnalysis){
+      message=pick([
+        'Certo. O que você precisa para fazer essa análise?',
+        'Tudo bem. Como faço para iniciar a simulação?'
+      ]);
+      stage='verificacao'; quality=60; missing=['dados para análise']; decision='aceitar_proximo_passo';
+    }else if(mentionsValue){
+      message=pick([
+        'Entendi. Esse valor depende da avaliação do veículo ou da minha renda?',
+        'Certo. Como vocês calculam o valor que pode ser liberado?'
+      ]);
+      stage='duvida'; quality=57; missing=['critério do valor']; decision='fazer_pergunta_coerente';
+    }else if(tooShort){
+      message=pick([
+        'Você pode me explicar melhor como funciona e o que preciso fazer agora?',
+        'Não entendi muito bem. Qual é o próximo passo para eu conseguir uma simulação?'
+      ]);
+      quality=30; missing=['explicação clara','próximo passo']; decision='pedir_esclarecimento';
+    }else{
+      message=pick([
+        'Entendi. Então qual é o próximo passo para dar andamento?',
+        'Certo. O que você precisa de mim para continuar a análise?'
+      ]);
+    }
+  }else if(asksDocs){
+    message=pick([
+      'Certo. Quais documentos exatamente eu preciso enviar?',
+      'Tudo bem. Você pode listar os documentos e dizer por onde devo enviar?'
+    ]);
+    stage='verificacao'; quality=60; missing=['documentos necessários']; decision='fazer_pergunta_coerente';
+  }else if(asksCpf){
+    message=pick([
+      'Certo, posso informar o CPF. Você precisa de mais algum dado?',
+      'Tudo bem. Além do CPF, o que mais você precisa para consultar?'
+    ]);
+    stage='verificacao'; quality=64; decision='aceitar_proximo_passo'; missing=['demais dados necessários'];
+  }else if(tooShort){
+    message=pick([
+      'Você pode me explicar melhor o que devo fazer agora?',
+      'Não entendi. Qual é o próximo passo no meu caso?'
+    ]);
+    quality=30;
+  }else{
+    message=pick([
+      'Entendi. O que você precisa de mim para seguir com o atendimento?',
+      'Certo. Qual é o próximo passo para resolver isso?'
+    ]);
+  }
+
   return {
     ok:true,
     fallback:true,
-    message:'Entendi. Você consegue me explicar de forma mais direta qual é o próximo passo no meu caso?',
+    message,
     end:false,
     outcome:'em andamento',
     mood:'confuso',
     trust:45,
     patience:55,
-    stage:'entendimento',
-    memory:{facts:[],questionsAnswered:[],openQuestions:['próximo passo']},
-    analysis:{quality:45,resolution:'parcial',missing:['próximo passo claro'],note:safeReason},
-    controller:{decision:'pedir_esclarecimento',reason:'Modo de contingência acionado automaticamente.'}
+    stage,
+    memory:{facts:[],questionsAnswered:[],openQuestions:missing},
+    analysis:{quality,resolution,missing,note:safeReason},
+    controller:{decision,reason:'Modo de contingência local contextual acionado automaticamente.'}
   };
 }
 
@@ -222,10 +316,10 @@ function sanitizeMessage(message,p,plan){
 export default async function handler(req,res){
   cors(res);
   if(req.method==='OPTIONS') return res.status(200).end();
-  if(req.method!=='POST') return json(res,405,fallback('Use POST.'));
-  if(!process.env.GEMINI_API_KEY) return json(res,200,fallback('GEMINI_API_KEY não configurada.'));
+  if(req.method!=='POST') return json(res,405,fallback());
   const payload=safePayload(req.body||{});
-  if(!payload.lastAgentMessage) return json(res,400,fallback('Resposta do atendente vazia.'));
+  if(!process.env.GEMINI_API_KEY) return json(res,200,fallback(payload));
+  if(!payload.lastAgentMessage) return json(res,400,fallback(payload));
   try{
     const rawPlan=await callGemini(controllerPrompt(payload),{temperature:.15,maxOutputTokens:1800});
     const plan=validatePlan(rawPlan,payload);
@@ -246,6 +340,6 @@ export default async function handler(req,res){
     });
   }catch(error){
     console.error('[cliente] Falha na IA principal:', error?.message||error);
-    return json(res,200,fallback());
+    return json(res,200,fallback(payload));
   }
 }
