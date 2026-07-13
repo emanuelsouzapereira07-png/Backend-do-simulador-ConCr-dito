@@ -3,9 +3,11 @@ import { cors, json } from './_utils.js';
 const clamp=(n,min=0,max=100)=>Math.max(min,Math.min(max,Number.isFinite(Number(n))?Number(n):min));
 const text=(v,max=1200)=>String(v??'').trim().slice(0,max);
 
-function fallback(reason='IA indisponível'){
+function fallback(){
+  const safeReason='IA principal temporariamente indisponível. O atendimento continuou pelo modo de contingência.';
   return {
-    ok:false,
+    ok:true,
+    fallback:true,
     message:'Entendi. Você consegue me explicar de forma mais direta qual é o próximo passo no meu caso?',
     end:false,
     outcome:'em andamento',
@@ -14,8 +16,8 @@ function fallback(reason='IA indisponível'){
     patience:55,
     stage:'entendimento',
     memory:{facts:[],questionsAnswered:[],openQuestions:['próximo passo']},
-    analysis:{quality:45,resolution:'parcial',missing:['próximo passo claro'],note:reason},
-    controller:{decision:'pedir_esclarecimento',reason}
+    analysis:{quality:45,resolution:'parcial',missing:['próximo passo claro'],note:safeReason},
+    controller:{decision:'pedir_esclarecimento',reason:'Modo de contingência acionado automaticamente.'}
   };
 }
 
@@ -67,19 +69,37 @@ function safePayload(body={}){
   };
 }
 
+const sleep=ms=>new Promise(resolve=>setTimeout(resolve,ms));
+function isTransientGeminiError(status,message=''){
+  return status===429 || status>=500 || /temporar|timeout|overloaded|unavailable/i.test(String(message));
+}
 async function callGemini(prompt,{temperature=.25,maxOutputTokens=1800}={}){
-  const model=process.env.GEMINI_MODEL||'gemini-2.0-flash';
-  const response=await fetch(`https://generativelanguage.googleapis.com/v1beta/models/${model}:generateContent?key=${process.env.GEMINI_API_KEY}`,{
-    method:'POST', headers:{'Content-Type':'application/json'},
-    body:JSON.stringify({
-      contents:[{role:'user',parts:[{text:prompt}]}],
-      generationConfig:{temperature,topP:.9,maxOutputTokens,responseMimeType:'application/json'}
-    })
-  });
-  const data=await response.json();
-  if(!response.ok) throw new Error(data?.error?.message||`Gemini HTTP ${response.status}`);
-  const raw=data?.candidates?.[0]?.content?.parts?.map(p=>p.text||'').join('')||'';
-  return extractJson(raw);
+  const model=process.env.GEMINI_MODEL||'gemini-2.5-flash';
+  const attempts=2;
+  let lastError=null;
+  for(let attempt=1;attempt<=attempts;attempt++){
+    try{
+      const response=await fetch(`https://generativelanguage.googleapis.com/v1beta/models/${model}:generateContent?key=${process.env.GEMINI_API_KEY}`,{
+        method:'POST', headers:{'Content-Type':'application/json'},
+        body:JSON.stringify({
+          contents:[{role:'user',parts:[{text:prompt}]}],
+          generationConfig:{temperature,topP:.9,maxOutputTokens,responseMimeType:'application/json'}
+        })
+      });
+      const data=await response.json().catch(()=>({}));
+      if(!response.ok){
+        const message=data?.error?.message||`Gemini HTTP ${response.status}`;
+        const err=new Error(message); err.status=response.status; throw err;
+      }
+      const raw=data?.candidates?.[0]?.content?.parts?.map(p=>p.text||'').join('')||'';
+      return extractJson(raw);
+    }catch(error){
+      lastError=error;
+      if(attempt<attempts && isTransientGeminiError(error.status,error.message)) await sleep(900);
+      else break;
+    }
+  }
+  throw lastError||new Error('IA indisponível');
 }
 
 function controllerPrompt(p){
@@ -225,6 +245,7 @@ export default async function handler(req,res){
       controller:{decision:plan.nextAction,reason:plan.reason}
     });
   }catch(error){
-    return json(res,200,fallback(error.message));
+    console.error('[cliente] Falha na IA principal:', error?.message||error);
+    return json(res,200,fallback());
   }
 }
