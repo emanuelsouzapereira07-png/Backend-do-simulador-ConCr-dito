@@ -1,6 +1,31 @@
 import { buildSupervisorPrompt } from '../prompts/supervisor.js';
+import { generateJson } from '../lib/ai-router.js';
 import { cors, json } from './_utils.js';
-function fallback(message){return {total:0,metrics:{context:0,diagnosis:0,action:0,safety:0,empathy:0,commercial:0},feedback:'Erro na análise',strengths:[],improvements:[message],suggested:''};}
-function extractJson(text){const clean=String(text||'').replace(/```json|```/g,'').trim();const s=clean.indexOf('{'),e=clean.lastIndexOf('}');return s>=0&&e>=s?clean.slice(s,e+1):clean;}
-export default async function handler(req,res){cors(res); if(req.method==='OPTIONS')return res.status(200).end(); if(req.method!=='POST')return json(res,405,fallback('Use POST.')); if(!process.env.GEMINI_API_KEY)return json(res,500,fallback('GEMINI_API_KEY não configurada.'));
- try{const prompt=buildSupervisorPrompt(req.body||{}); const model=process.env.GEMINI_MODEL||'gemini-1.5-flash'; const r=await fetch(`https://generativelanguage.googleapis.com/v1beta/models/${model}:generateContent?key=${process.env.GEMINI_API_KEY}`,{method:'POST',headers:{'Content-Type':'application/json'},body:JSON.stringify({contents:[{role:'user',parts:[{text:prompt}]}],generationConfig:{temperature:.35,responseMimeType:'application/json'}})}); const data=await r.json(); if(!r.ok)return json(res,500,fallback(data?.error?.message||'Erro no Gemini.')); const parsed=JSON.parse(extractJson(data?.candidates?.[0]?.content?.parts?.[0]?.text||'{}')); return json(res,200,parsed);}catch(e){return json(res,500,fallback(e.message));}}
+
+function fallback() {
+  return {
+    total: 0,
+    metrics: { context: 0, diagnosis: 0, action: 0, safety: 0, empathy: 0, commercial: 0 },
+    feedback: 'A avaliação automática ficou temporariamente indisponível.',
+    strengths: [],
+    improvements: ['Tente novamente em alguns instantes.'],
+    suggested: '',
+    fallback: true
+  };
+}
+
+export default async function handler(req, res) {
+  cors(res);
+  if (req.method === 'OPTIONS') return res.status(200).end();
+  if (req.method !== 'POST') return json(res, 405, fallback());
+  if (!process.env.GROQ_API_KEY && !process.env.GEMINI_API_KEY) return json(res, 200, fallback());
+
+  try {
+    const prompt = buildSupervisorPrompt(req.body || {});
+    const { data, provider } = await generateJson(prompt, { temperature: 0.35, maxOutputTokens: 2200 });
+    return json(res, 200, { ...data, provider });
+  } catch (error) {
+    console.error('[analisar] Todos os provedores falharam:', error?.details || error?.message || error);
+    return json(res, 200, fallback());
+  }
+}

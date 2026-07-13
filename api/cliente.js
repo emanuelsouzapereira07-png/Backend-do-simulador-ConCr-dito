@@ -1,4 +1,5 @@
 import { cors, json } from './_utils.js';
+import { generateJson } from '../lib/ai-router.js';
 
 const clamp=(n,min=0,max=100)=>Math.max(min,Math.min(max,Number.isFinite(Number(n))?Number(n):min));
 const text=(v,max=1200)=>String(v??'').trim().slice(0,max);
@@ -163,39 +164,6 @@ function safePayload(body={}){
   };
 }
 
-const sleep=ms=>new Promise(resolve=>setTimeout(resolve,ms));
-function isTransientGeminiError(status,message=''){
-  return status===429 || status>=500 || /temporar|timeout|overloaded|unavailable/i.test(String(message));
-}
-async function callGemini(prompt,{temperature=.25,maxOutputTokens=1800}={}){
-  const model=process.env.GEMINI_MODEL||'gemini-2.5-flash';
-  const attempts=2;
-  let lastError=null;
-  for(let attempt=1;attempt<=attempts;attempt++){
-    try{
-      const response=await fetch(`https://generativelanguage.googleapis.com/v1beta/models/${model}:generateContent?key=${process.env.GEMINI_API_KEY}`,{
-        method:'POST', headers:{'Content-Type':'application/json'},
-        body:JSON.stringify({
-          contents:[{role:'user',parts:[{text:prompt}]}],
-          generationConfig:{temperature,topP:.9,maxOutputTokens,responseMimeType:'application/json'}
-        })
-      });
-      const data=await response.json().catch(()=>({}));
-      if(!response.ok){
-        const message=data?.error?.message||`Gemini HTTP ${response.status}`;
-        const err=new Error(message); err.status=response.status; throw err;
-      }
-      const raw=data?.candidates?.[0]?.content?.parts?.map(p=>p.text||'').join('')||'';
-      return extractJson(raw);
-    }catch(error){
-      lastError=error;
-      if(attempt<attempts && isTransientGeminiError(error.status,error.message)) await sleep(900);
-      else break;
-    }
-  }
-  throw lastError||new Error('IA indisponível');
-}
-
 function controllerPrompt(p){
   return `Você é o CONTROLADOR invisível de um simulador corporativo de atendimento da ConCrédito.
 Analise a conversa inteira e a última resposta do atendente. Não escreva a fala do cliente ainda.
@@ -318,25 +286,25 @@ export default async function handler(req,res){
   if(req.method==='OPTIONS') return res.status(200).end();
   if(req.method!=='POST') return json(res,405,fallback());
   const payload=safePayload(req.body||{});
-  if(!process.env.GEMINI_API_KEY) return json(res,200,fallback(payload));
+  if(!process.env.GROQ_API_KEY && !process.env.GEMINI_API_KEY) return json(res,200,fallback(payload));
   if(!payload.lastAgentMessage) return json(res,400,fallback(payload));
   try{
-    const rawPlan=await callGemini(controllerPrompt(payload),{temperature:.15,maxOutputTokens:1800});
+    const { data: rawPlan, provider: controllerProvider } = await generateJson(controllerPrompt(payload),{temperature:.15,maxOutputTokens:1800});
     const plan=validatePlan(rawPlan,payload);
     let generated;
     try{
-      generated=await callGemini(clientPrompt(payload,plan),{temperature:.72,maxOutputTokens:500});
+      ({ data: generated } = await generateJson(clientPrompt(payload,plan),{temperature:.72,maxOutputTokens:500}));
       generated.message=sanitizeMessage(generated.message,payload,plan);
     }catch(firstError){
       const retryPrompt=clientPrompt(payload,{...plan,reason:`${plan.reason}. REVISÃO OBRIGATÓRIA: evite repetição, mistura de produto e reclamação de demora sem base.`});
-      generated=await callGemini(retryPrompt,{temperature:.45,maxOutputTokens:500});
+      ({ data: generated } = await generateJson(retryPrompt,{temperature:.45,maxOutputTokens:500}));
       generated.message=sanitizeMessage(generated.message,payload,plan);
     }
     return json(res,200,{
       ok:true, message:generated.message, end:plan.end, outcome:plan.outcome,
       mood:plan.mood, trust:plan.trust, patience:plan.patience, stage:plan.stage, memory:plan.memory,
       analysis:{quality:plan.quality,resolution:plan.resolution,missing:plan.missingPoints,note:plan.reason,answered:plan.answeredPoints,contradictions:plan.contradictions},
-      controller:{decision:plan.nextAction,reason:plan.reason}
+      controller:{decision:plan.nextAction,reason:plan.reason,provider:controllerProvider}
     });
   }catch(error){
     console.error('[cliente] Falha na IA principal:', error?.message||error);
