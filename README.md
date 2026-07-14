@@ -44,3 +44,25 @@ Execute o arquivo `supabase_schema.sql` no SQL Editor do Supabase.
 3. Configure as variáveis de ambiente.
 4. Execute o SQL no Supabase.
 5. Use a URL da Vercel no frontend quando quiser integrar online.
+
+## Diagnóstico da IA
+
+Depois de cadastrar `GROQ_API_KEY` no Vercel, é obrigatório criar um **novo deployment**. Variáveis adicionadas depois de um deployment não aparecem retroativamente nas Functions já publicadas.
+
+Após o deploy, acesse:
+
+```
+/api/ai-status
+```
+
+O resultado esperado é:
+
+```json
+{
+  "groqConfigured": true,
+  "geminiConfigured": true,
+  "vercelEnvironment": "production"
+}
+```
+
+Se `groqConfigured` continuar `false`, confirme se o deployment foi criado depois da variável e se ele pertence ao mesmo projeto/ambiente Production.
