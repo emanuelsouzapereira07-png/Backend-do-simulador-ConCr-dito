@@ -230,7 +230,10 @@ REGRAS ABSOLUTAS
 8. Se foi parcial, pergunte apenas o ponto que falta. Se foi incoerente, aponte exatamente a incoerência.
 9. Só reclame de demora quando o plano permitir.
 10. Máximo de 2 frases curtas; sem texto técnico; caixa alta apenas se o humor for irritado e sem exagero.
-11. Se end=true, escreva um encerramento compatível com outcome.
+11. Se end=true, encerre de forma definitiva e natural, sem fazer nenhuma pergunta nova:
+   - encerrar_sucesso: confirme que ficou claro/resolvido e agradeça brevemente.
+   - encerrar_desistencia: diga que não continuará ou que buscará outra alternativa e finalize.
+   Nunca use ponto de interrogação quando end=true.
 
 CASO
 ${JSON.stringify(p.caseData,null,2)}
@@ -261,11 +264,89 @@ function validatePlan(raw,p){
   if(plan.end && !['encerrar_sucesso','encerrar_desistencia'].includes(plan.nextAction)) plan.end=false;
   if(plan.nextAction==='encerrar_sucesso' && !['resolveu','parcial'].includes(plan.resolution)) { plan.end=false; plan.nextAction='pedir_esclarecimento'; }
   if(p.state.responseDelayMs<120000 && !p.state.mayComplainDelay && /demor|aguard|tempo/i.test(plan.newQuestion)) plan.newQuestion='';
+  return applyAutomaticEndingRules(plan,p);
+}
+
+function currentTurnCount(p){
+  const historyTurns=p.history.filter(m=>m.author==='atendente').length;
+  return Math.max(Number(p.state.turns)||0,historyTurns);
+}
+
+function applyAutomaticEndingRules(plan,p){
+  const turns=currentTurnCount(p);
+  const resolvedWell=plan.resolution==='resolveu' && plan.quality>=82;
+  const excellentPartial=plan.resolution==='parcial' && plan.quality>=92 && plan.missingPoints.length===0;
+  const acceptedClearStep=plan.nextAction==='aceitar_proximo_passo' && plan.quality>=88 && plan.missingPoints.length<=1;
+  const severeFailure=['rude','promessa_indevida'].includes(plan.resolution);
+  const veryBad=plan.quality<=20 || plan.trust<=10 || plan.patience<=8;
+  const repeatedWeak=turns>=4 && plan.quality<=30 && plan.trust<=25;
+
+  if(resolvedWell || excellentPartial || acceptedClearStep){
+    plan.end=true;
+    plan.outcome='concluiu';
+    plan.nextAction='encerrar_sucesso';
+    plan.stage='fechamento';
+    plan.mood='satisfeito';
+    plan.trust=Math.max(plan.trust,82);
+    plan.patience=Math.max(plan.patience,45);
+    plan.reason='O atendente resolveu o objetivo do cliente ou apresentou um próximo passo claro e suficiente.';
+    return plan;
+  }
+
+  if(severeFailure || veryBad || repeatedWeak){
+    plan.end=true;
+    plan.outcome=plan.patience<=8?'perdeu paciência':'desistiu';
+    plan.nextAction='encerrar_desistencia';
+    plan.stage='fechamento';
+    plan.mood=plan.resolution==='rude'?'irritado':'desconfiado';
+    plan.trust=Math.min(plan.trust,12);
+    plan.patience=Math.min(plan.patience,10);
+    plan.reason=severeFailure
+      ? 'O atendimento teve uma falha grave que tornou inadequado continuar.'
+      : 'A resposta foi muito fraca ou a confiança/paciência do cliente chegou ao limite.';
+    return plan;
+  }
+
+  // Trava de segurança contra conversas infinitas.
+  if(turns>=8){
+    const reasonablySolved=plan.quality>=60 && ['resolveu','parcial'].includes(plan.resolution);
+    plan.end=true;
+    plan.stage='fechamento';
+    if(reasonablySolved){
+      plan.outcome='concluiu';
+      plan.nextAction='encerrar_sucesso';
+      plan.mood='satisfeito';
+      plan.reason='O limite máximo de turnos foi atingido e o atendimento apresentou solução suficiente.';
+    }else{
+      plan.outcome='desistiu';
+      plan.nextAction='encerrar_desistencia';
+      plan.mood=plan.patience<=25?'irritado':'desconfiado';
+      plan.reason='O limite máximo de turnos foi atingido sem solução suficiente para o cliente.';
+    }
+  }
+
   return plan;
 }
 
+function forceFinalMessage(message,plan){
+  if(!plan.end) return message;
+  let m=String(message||'').replace(/\?/g,'.').replace(/\s+/g,' ').trim();
+  const asksSomething=/\b(como|qual|quais|quando|onde|pode|consegue|preciso|devo)\b.*[.?]?$/i.test(m);
+  if(plan.nextAction==='encerrar_sucesso'){
+    if(!m || asksSomething) return 'Perfeito, agora ficou tudo claro. Obrigado pelo atendimento!';
+    if(!/[.!]$/.test(m)) m+='.';
+    return m;
+  }
+  if(plan.nextAction==='encerrar_desistencia'){
+    if(!m || asksSomething) return 'Entendi. Nesse caso, não vou continuar e vou buscar outra alternativa. Obrigado.';
+    if(!/[.!]$/.test(m)) m+='.';
+    return m;
+  }
+  return m;
+}
+
 function sanitizeMessage(message,p,plan){
-  let m=text(message,700).replace(/\s+/g,' ').trim();
+  let m=forceFinalMessage(text(message,700).replace(/\s+/g,' ').trim(),plan);
   const recent=p.history.slice(-8).filter(x=>x.author==='cliente').map(x=>x.text.toLowerCase());
   if(!m) throw new Error('Mensagem vazia.');
   if(recent.includes(m.toLowerCase())) throw new Error('Mensagem repetida.');
@@ -278,6 +359,7 @@ function sanitizeMessage(message,p,plan){
   if(!product.includes('trabalhador')&&!product.includes('clt')) forbidden.push('carteira de trabalho','ctps');
   if(forbidden.some(x=>m.toLowerCase().includes(x))) throw new Error('Mensagem misturou produto.');
   if(/pendência|autorização ctps/i.test(m)) throw new Error('Categoria interna indevida.');
+  if(plan.end && /\?/.test(m)) m=forceFinalMessage('',plan);
   return m;
 }
 
