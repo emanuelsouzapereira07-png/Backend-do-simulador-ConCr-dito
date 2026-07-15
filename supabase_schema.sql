@@ -52,3 +52,8 @@ alter table public.audit_logs enable row level security;
 alter table public.notifications enable row level security;
 
 -- O backend usa SERVICE_ROLE_KEY, então não é necessário criar políticas públicas.
+
+-- V31: métricas de satisfação e feedback final da sessão
+alter table public.results add column if not exists csat_average numeric(3,2);
+alter table public.results add column if not exists csat_count integer default 0;
+alter table public.results add column if not exists supervisor_feedback text;
