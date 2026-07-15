@@ -1,5 +1,8 @@
 import { cors, json } from './_utils.js';
 import { generateJson } from '../lib/ai-router.js';
+import { buildCsatPrompt } from '../prompts/csat.js';
+import { buildSessionSupervisorPrompt } from '../prompts/supervisor-session.js';
+import { buildSupervisorPrompt } from '../prompts/supervisor.js';
 
 const clamp=(n,min=0,max=100)=>Math.max(min,Math.min(max,Number.isFinite(Number(n))?Number(n):min));
 const text=(v,max=1200)=>String(v??'').trim().slice(0,max);
@@ -281,7 +284,7 @@ function sanitizeMessage(message,p,plan){
   return m;
 }
 
-export default async function handler(req,res){
+async function handleCliente(req,res){
   cors(res);
   if(req.method==='OPTIONS') return res.status(200).end();
   if(req.method!=='POST') return json(res,405,fallback());
@@ -310,4 +313,68 @@ export default async function handler(req,res){
     console.error('[cliente] Falha na IA principal:', error?.message||error);
     return json(res,200,fallback(payload));
   }
+}
+
+
+const CSAT_LABELS = {1:'Péssimo',2:'Ruim',3:'Regular',4:'Bom',5:'Excelente'};
+
+function csatFallback(payload={}){
+  const outcome=String(payload.outcome||'').toLowerCase();
+  let rating=3;
+  if(/aceitou|conclu[ií]do|concluiu|resolvido/.test(outcome)) rating=4;
+  if(/desistiu|paci[eê]ncia|demora|abandono/.test(outcome)) rating=1;
+  return {rating,label:CSAT_LABELS[rating],reason:'Avaliação estimada pelo modo de contingência.',fallback:true};
+}
+
+async function handleCsat(req,res){
+  if(req.method!=='POST') return json(res,405,{error:'Use POST'});
+  try{
+    const {data,provider}=await generateJson(buildCsatPrompt(req.body||{}),{temperature:0.2,maxOutputTokens:500});
+    const rating=Math.max(1,Math.min(5,Math.round(Number(data?.rating)||3)));
+    return json(res,200,{rating,label:CSAT_LABELS[rating],reason:String(data?.reason||'').slice(0,300),provider});
+  }catch(error){
+    console.error('[csat]',error?.details||error?.message||error);
+    return json(res,200,csatFallback(req.body||{}));
+  }
+}
+
+function supervisorFallback(){
+  return {feedback:'Durante esta sessão, revise com atenção se cada cliente recebeu uma orientação correta e um próximo passo claro. Mantenha a cordialidade e a objetividade que funcionaram bem, mas evite encerrar conversas antes de confirmar que a dúvida foi realmente resolvida. Nos próximos treinamentos, priorize respostas completas, seguras e adaptadas ao contexto de cada cliente.',fallback:true};
+}
+
+async function handleSupervisorSessao(req,res){
+  if(req.method!=='POST') return json(res,405,{error:'Use POST'});
+  try{
+    const {data,provider}=await generateJson(buildSessionSupervisorPrompt(req.body||{}),{temperature:0.35,maxOutputTokens:1800});
+    return json(res,200,{feedback:String(data?.feedback||supervisorFallback().feedback).trim(),provider});
+  }catch(error){
+    console.error('[supervisor-sessao]',error?.details||error?.message||error);
+    return json(res,200,supervisorFallback());
+  }
+}
+
+function analysisFallback(){
+  return {total:0,metrics:{context:0,diagnosis:0,action:0,safety:0,empathy:0,commercial:0},feedback:'A avaliação automática ficou temporariamente indisponível.',strengths:[],improvements:['Tente novamente em alguns instantes.'],suggested:'',fallback:true};
+}
+
+async function handleAnalisar(req,res){
+  if(req.method!=='POST') return json(res,405,analysisFallback());
+  try{
+    const prompt=buildSupervisorPrompt(req.body||{});
+    const {data,provider}=await generateJson(prompt,{temperature:0.35,maxOutputTokens:2200});
+    return json(res,200,{...data,provider});
+  }catch(error){
+    console.error('[analisar]',error?.details||error?.message||error);
+    return json(res,200,analysisFallback());
+  }
+}
+
+export default async function handler(req,res){
+  cors(res);
+  if(req.method==='OPTIONS') return res.status(200).end();
+  const action=String(req.query?.action||req.body?.action||'cliente').toLowerCase();
+  if(action==='csat') return handleCsat(req,res);
+  if(action==='supervisor' || action==='supervisor-sessao') return handleSupervisorSessao(req,res);
+  if(action==='analisar' || action==='avaliar') return handleAnalisar(req,res);
+  return handleCliente(req,res);
 }

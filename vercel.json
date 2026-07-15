@@ -1,1 +1,19 @@
-{"version":2,"functions":{"api/*.js":{"maxDuration":30}}}
+{
+  "version": 2,
+  "functions": {
+    "api/*.js": { "maxDuration": 30 }
+  },
+  "rewrites": [
+    { "source": "/api/csat", "destination": "/api/cliente?action=csat" },
+    { "source": "/api/supervisor-sessao", "destination": "/api/cliente?action=supervisor-sessao" },
+    { "source": "/api/analisar", "destination": "/api/cliente?action=analisar" },
+    { "source": "/api/results", "destination": "/api/admin?action=results" },
+    { "source": "/api/salvar", "destination": "/api/admin?action=salvar" },
+    { "source": "/api/excluir", "destination": "/api/admin?action=excluir" },
+    { "source": "/api/stats", "destination": "/api/admin?action=stats" },
+    { "source": "/api/notifications", "destination": "/api/admin?action=notifications" },
+    { "source": "/api/treinamentos", "destination": "/api/admin?action=treinamentos" },
+    { "source": "/api/cases", "destination": "/api/sistema?action=cases" },
+    { "source": "/api/audit", "destination": "/api/sistema?action=audit" }
+  ]
+}

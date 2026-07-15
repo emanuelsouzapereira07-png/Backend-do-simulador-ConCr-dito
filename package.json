@@ -1,1 +1,11 @@
-{"name":"backend-simulador-concredito-v14","version":"14.0.0","type":"module","private":true,"scripts":{"dev":"vercel dev","start":"vercel dev"},"dependencies":{}}
+{
+  "name": "backend-simulador-concredito-v32",
+  "version": "32.0.0",
+  "type": "module",
+  "private": true,
+  "scripts": {
+    "dev": "vercel dev",
+    "start": "vercel dev"
+  },
+  "dependencies": {}
+}
