@@ -33,6 +33,11 @@ function fallback(payload=null){
   const mentionsAnalysis=/an[aá]lis|simula|consulta/.test(last);
   const mentionsValue=/valor|parcela|taxa|libera/.test(last);
   const tooShort=last.length<18;
+  const rude=/\b(se vira|porra|caralho|foda-se|foda se|vai se foder|idiota|burro|cala a boca|problema seu|merda)\b/i.test(last);
+  const explicitClose=/\b(encerra|encerrar|fecha a conversa|finaliza|finalizar)\b/i.test(last);
+  if(rude || explicitClose){
+    return {ok:true,fallback:true,message:rude?'Esse tipo de tratamento é inaceitável. Vou encerrar o atendimento e procurar um supervisor.':'Como minha dúvida não foi resolvida, vou encerrar o atendimento.',end:true,outcome:'perdeu paciência',mood:'irritado',trust:0,patience:0,stage:'fechamento',memory:{facts:[],questionsAnswered:[],openQuestions:[]},analysis:{quality:0,resolution:'rude',missing:['resolução da dúvida'],note:safeReason},controller:{decision:'encerrar_desistencia',reason:'Encerramento local por linguagem inadequada ou pedido de encerramento sem resolução.'}};
+  }
 
   if(isVehicle){
     if(asksDocs){
@@ -180,6 +185,10 @@ PRINCÍPIOS OBRIGATÓRIOS
 - Uma solicitação legítima de CPF/dados para consulta conta como próximo passo, quando coerente com a orientação aprovada.
 - Reclamação de demora só é permitida se responseDelayMs >= 120000 ou mayComplainDelay=true.
 - Não encerre por sucesso sem objetivo alcançado ou próximo passo aceito.
+- Encerre imediatamente por desistência quando houver ofensa, palavrão, deboche, recusa explícita em ajudar ou pedido para o cliente se virar.
+- Se o atendente mandar encerrar sem resolver, encerre por falha.
+- Se o objetivo estiver totalmente resolvido, encerre por sucesso; não invente uma nova pergunta.
+- Após 3 respostas fracas/repetidas ou confiança/paciência no limite, encerre por desistência.
 - Atualize humor, confiança e paciência de modo gradual e justificável.
 - Crie no máximo uma nova dúvida, sempre compatível com o caso e ainda não respondida.
 - Não use categorias internas como “Pendência”, “Dúvida”, “Consulta” ou “Autorização CTPS” na fala futura.
@@ -249,6 +258,47 @@ ${JSON.stringify(plan,null,2)}
 Responda SOMENTE JSON: {"message":"texto do cliente"}`;
 }
 
+
+function countRecentWeakAgentMessages(p){
+  const agent=(p.history||[]).filter(m=>m.author==='atendente').slice(-4).map(m=>String(m.text||'').trim().toLowerCase());
+  return agent.filter(m=>m.length<22 || /\b(sei la|sei lá|não sei|nao sei|se vira|problema seu|encerra|tanto faz)\b/.test(m)).length;
+}
+
+function applyHardTerminationRules(plan,p){
+  const last=String(p.lastAgentMessage||'').trim().toLowerCase();
+  const rude=/\b(se vira|porra|caralho|foda-se|foda se|vai se foder|idiota|burro|cala a boca|problema seu|não enche|nao enche|merda)\b/i.test(last);
+  const explicitClose=/\b(encerra|encerrar|fecha a conversa|finaliza|finalizar)\b/i.test(last);
+  const severeBad=['rude','promessa_indevida'].includes(plan.resolution);
+  const weakCount=countRecentWeakAgentMessages(p);
+  const solved=plan.resolution==='resolveu' && plan.quality>=82 && (plan.missingPoints||[]).length===0;
+  const exhausted=(plan.trust<=10 || plan.patience<=10) && ['nao_resolveu','fugiu_do_assunto','inseguro','rude','promessa_indevida'].includes(plan.resolution);
+  const maxTurns=Number(p.state.turns||0)>=8;
+
+  if(rude || severeBad){
+    return {...plan,end:true,nextAction:'encerrar_desistencia',outcome:'perdeu paciência',mood:'irritado',trust:0,patience:0,
+      reason:'O atendente utilizou linguagem inadequada ou apresentou uma conduta grave. O cliente encerrou insatisfeito.'};
+  }
+  if(explicitClose && !solved){
+    return {...plan,end:true,nextAction:'encerrar_desistencia',outcome:'desistiu',mood:'irritado',trust:5,patience:0,
+      reason:'O atendente pediu o encerramento sem resolver a dúvida do cliente.'};
+  }
+  if(exhausted || weakCount>=3){
+    return {...plan,end:true,nextAction:'encerrar_desistencia',outcome:'perdeu paciência',mood:'irritado',trust:Math.min(plan.trust,8),patience:0,
+      reason:'O cliente repetiu a dúvida e recebeu respostas fracas ou insuficientes várias vezes.'};
+  }
+  if(solved){
+    return {...plan,end:true,nextAction:'encerrar_sucesso',outcome:'concluiu',mood:'satisfeito',trust:Math.max(plan.trust,85),patience:Math.max(plan.patience,55),
+      reason:'A resposta resolveu o objetivo do caso e apresentou uma orientação clara.'};
+  }
+  if(maxTurns){
+    if(plan.quality>=65 && ['resolveu','parcial'].includes(plan.resolution)){
+      return {...plan,end:true,nextAction:'encerrar_sucesso',outcome:'concluiu',mood:'satisfeito',reason:'A conversa atingiu o limite e o cliente recebeu orientação suficiente.'};
+    }
+    return {...plan,end:true,nextAction:'encerrar_desistencia',outcome:'desistiu',mood:'irritado',patience:0,reason:'A conversa atingiu o limite sem resolver a dúvida do cliente.'};
+  }
+  return plan;
+}
+
 function validatePlan(raw,p){
   const allowedRes=new Set(['resolveu','parcial','nao_resolveu','fugiu_do_assunto','inseguro','rude','promessa_indevida']);
   const allowedAction=new Set(['aceitar_proximo_passo','fazer_pergunta_coerente','pedir_esclarecimento','corrigir_atendente','aguardar_verificacao','encerrar_sucesso','encerrar_desistencia']);
@@ -264,7 +314,7 @@ function validatePlan(raw,p){
   if(plan.end && !['encerrar_sucesso','encerrar_desistencia'].includes(plan.nextAction)) plan.end=false;
   if(plan.nextAction==='encerrar_sucesso' && !['resolveu','parcial'].includes(plan.resolution)) { plan.end=false; plan.nextAction='pedir_esclarecimento'; }
   if(p.state.responseDelayMs<120000 && !p.state.mayComplainDelay && /demor|aguard|tempo/i.test(plan.newQuestion)) plan.newQuestion='';
-  return plan;
+  return applyHardTerminationRules(plan,p);
 }
 
 function sanitizeMessage(message,p,plan){
@@ -289,7 +339,7 @@ async function handleCliente(req,res){
   if(req.method==='OPTIONS') return res.status(200).end();
   if(req.method!=='POST') return json(res,405,fallback());
   const payload=safePayload(req.body||{});
-  if(!process.env.GROQ_API_KEY && !process.env.GEMINI_API_KEY) return json(res,200,fallback(payload));
+  if(!process.env.GROQ_API_KEY && !process.env.CEREBRAS_API_KEY && !process.env.GEMINI_API_KEY) return json(res,200,fallback(payload));
   if(!payload.lastAgentMessage) return json(res,400,fallback(payload));
   try{
     const { data: rawPlan, provider: controllerProvider } = await generateJson(controllerPrompt(payload),{temperature:.15,maxOutputTokens:1800});
