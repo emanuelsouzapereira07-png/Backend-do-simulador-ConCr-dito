@@ -395,8 +395,18 @@ function supervisorFallback(){
 async function handleSupervisorSessao(req,res){
   if(req.method!=='POST') return json(res,405,{error:'Use POST'});
   try{
-    const {data,provider}=await generateJson(buildSessionSupervisorPrompt(req.body||{}),{temperature:0.35,maxOutputTokens:1800});
-    return json(res,200,{feedback:String(data?.feedback||supervisorFallback().feedback).trim(),provider});
+    const {data,provider}=await generateJson(buildSessionSupervisorPrompt(req.body||{}),{temperature:0.28,maxOutputTokens:3200});
+    const fallbackText=supervisorFallback().feedback;
+    return json(res,200,{
+      summary:String(data?.summary||data?.feedback||fallbackText).trim(),
+      strengths:Array.isArray(data?.strengths)?data.strengths.slice(0,4).map(x=>String(x).slice(0,500)):[],
+      improvements:Array.isArray(data?.improvements)?data.improvements.slice(0,4).map(x=>String(x).slice(0,500)):[],
+      criticalCase:data?.criticalCase&&typeof data.criticalCase==='object'?data.criticalCase:null,
+      conclusion:String(data?.conclusion||'').trim(),
+      caseReviews:Array.isArray(data?.caseReviews)?data.caseReviews.slice(0,30):[],
+      feedback:String(data?.feedback||data?.summary||fallbackText).trim(),
+      provider
+    });
   }catch(error){
     console.error('[supervisor-sessao]',error?.details||error?.message||error);
     return json(res,200,supervisorFallback());
